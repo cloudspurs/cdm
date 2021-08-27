@@ -1,0 +1,94 @@
+# jrt-dina jags model define
+
+model {
+	# response correctness  and response time
+	for(n in 1:N) { # stu number
+		for(i in 1:I) { # item number
+			for(k in 1:K) { # attribute number, 是否掌握题目需要的各个属性
+				w[n, i, k] <- pow(attribute[n, k], Q[i, k]) 
+			}
+			logit(prob[n, i]) <- beta[i] + delta[i] * prod(w[n, i,]) # prob: 向量元素相乘
+
+			# 通过作答对错和作答时间和这两个分布想接近来估计各参数
+			score[n, i] ~ dbern(prob[n, i]) # score: 作答对错
+			log_rt[n, i] ~ dnorm(zeta[i] - tao[n], den_epsilon[i]) # log_rt: log(response_time)
+		}
+	}
+
+	# ho-dina
+	for(n in 1:N) {
+		for(k in 1:K) {
+			logit(att_prob[n, k]) <- gamma[k] * theta[n] - lanmda[k]
+			attribute[n, k] ~ dbern(att_prob[n, k])
+		}
+	}
+
+	# person parameters, theta, tao
+	for(n in 1:N) {
+		person_parameter[n, 1:2] ~ dmnorm(person_mu[1:2], person_den[1:2, 1:2])
+		theta[n] <- person_parameter[n, 1]
+		tao[n] <- person_parameter[n, 2]
+	}
+
+	# item parameters
+	for(i in 1:I) {
+		item_parameter[i, 1:3] ~ dmnorm(item_mu[1:3], item_den[1:3, 1:3])
+		beta[i] <- item_parameter[i, 1]
+		delta[i] <- item_parameter[i, 2]
+		zeta[i] <- item_parameter[i, 3]
+
+		logit(guess[i]) <- beta[i]
+		logit(no_slip[i]) <- beta[i] + delta[i]
+		slip[i] <- 1 - no_slip[i]
+
+		den_epsilon[i] ~ dgamma(1, 1)
+		sigma_epsilon[i] <- 1/den_epsilon[i]
+	}
+
+	for(k in 1:K) {
+		gamma[k] ~ dnorm(0, 4)	T(0, )
+		lanmda[k] ~ dnorm(0, 4)
+	}
+		
+	# person parameters
+	person_mu[1] <- 0
+	person_mu[2] <- 0
+	L_theta[1, 1] <- 1
+	L_theta[1, 2] <- 0
+	L_theta[2, 1] ~ dnorm(0, 1)
+	L_theta[2, 2] ~ dgamma(1, 1)
+	sigma_theta <- L_theta %*% t(L_theta)
+	person_den[1:2, 1:2] <- inverse(sigma_theta[1:2, 1:2])
+
+	# item parameters
+	item_mu[1] ~ dnorm(-2.197, 2)
+	item_mu[2] ~ dnorm(4.394, 2)	T(0,)
+	item_mu[3] ~ dnorm(3, 2)
+
+	# R: 单位矩阵
+	R[1, 1] <- 1
+	R[2, 2] <- 1
+	R[3, 3] <- 1
+	R[1, 2] <- 0
+	R[1, 3] <- 0
+	R[2, 1] <- 0
+	R[2, 3] <- 0
+	R[3, 1] <- 0
+	R[3, 2] <- 0
+
+	item_den[1:3, 1:3] ~ dwish(R[1:3, 1:3], 3)
+	sigma_item[1:3, 1:3] <- inverse(item_den[1:3, 1:3]) # ??? sigma_item没有用到
+	
+	# calculate ppp
+	for(n in 1:N) {
+		for(i in 1:I) {
+			teststat[n, i] <- pow(score[n, i] - prob[n, i], 2) / (prob[n, i] * (1 - prob[n, i]))
+			score_rep[n, i] ~ dbern(prob[n, i])
+			teststat_rep[n, i] <- pow(score_rep[n, i] - prob[n, i], 2) / (prob[n, i] * (1 - prob[n, i]))
+		}
+	}
+	teststatsum <- sum(teststat[1:N, 1:I])
+	teststatsum_rep <- sum(teststat_rep[1:N, 1:I])
+	ppp <- step(teststatsum_rep - teststatsum)
+}
+
